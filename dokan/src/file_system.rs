@@ -9,7 +9,7 @@ use std::{
 
 use bitflags::bitflags;
 use dokan_sys::{
-	DokanCloseHandle, DokanCreateFileSystem, DokanWaitForFileSystemClosed,
+	DokanCloseHandle, DokanCreateFileSystem, DokanRequestUnmount, DokanWaitForFileSystemClosed,
 	DOKAN_DRIVER_INSTALL_ERROR, DOKAN_DRIVE_LETTER_ERROR, DOKAN_ERROR, DOKAN_HANDLE,
 	DOKAN_MOUNT_ERROR, DOKAN_MOUNT_POINT_ERROR, DOKAN_OPERATIONS, DOKAN_OPTIONS,
 	DOKAN_OPTION_ALLOW_IPC_BATCHING, DOKAN_OPTION_ALT_STREAM, DOKAN_OPTION_CASE_SENSITIVE,
@@ -342,5 +342,15 @@ fn can_fail_to_mount() {
 /// Therefore, ensure you do not use it after the file system is unmounted.
 #[derive(Clone, Copy)]
 pub struct FileSystemHandle(pub(crate) DOKAN_HANDLE);
+
+impl FileSystemHandle {
+	/// Requests an unmount of this exact file system instance without waiting for it to close.
+	///
+	/// This does not look up the file system by its mount point. Use the owning [`FileSystem`]
+	/// lifetime to ensure this handle is not used after the instance has closed.
+	pub fn request_unmount(self) -> bool {
+		unsafe { DokanRequestUnmount(self.0) != 0 }
+	}
+}
 
 unsafe impl Send for FileSystemHandle {}

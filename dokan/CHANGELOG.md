@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `FileSystemHandle::request_unmount` to request a non-blocking unmount of an exact filesystem instance.
+
 ### Changed
 
-- Upgrade to **Dokan 2.3.0** through `dokan-sys`.
+- Upgrade to **Dokan 2.3.1** through `dokan-sys`.
 - Bump dependencies.
 - **Library breaking change:** DOKAN_FILE_INFO.DeleteOnClose was renamed DOKAN_FILE_INFO.DeletePending. Same
   expectation (remove the object) but is set when last handle on the object is being closed dokan-dev/dokany#883.

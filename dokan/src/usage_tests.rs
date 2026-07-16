@@ -928,6 +928,41 @@ pub fn with_test_drive<Scope: FnOnce(TestDriveContext)>(scope: Scope) {
 }
 
 #[test]
+fn requests_exact_instance_unmount() {
+	let _guard = TEST_DRIVE_LOCK.lock();
+
+	init();
+	let _ = unmount(convert_str("Z:\\"));
+
+	let (tx_instance, rx_instance) = mpsc::sync_channel(1);
+	let (tx_signal, rx_signal) = mpsc::sync_channel(1024);
+
+	let drive_thread_handle = thread::spawn(move || {
+		let mount_point = convert_str("Z:\\");
+		let handler = TestHandler::new(tx_signal);
+		let options = MountOptions {
+			single_thread: true,
+			flags: test_flags(),
+			timeout: Duration::from_secs(15),
+			allocation_unit_size: 1024,
+			sector_size: 1024,
+			..Default::default()
+		};
+		let mut file_system = FileSystemMounter::new(&handler, &mount_point, &options);
+		let mount_handle = file_system.mount().unwrap();
+		tx_instance.send(mount_handle.instance()).unwrap();
+		drop(mount_handle);
+	});
+
+	assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Mounted);
+	assert!(rx_instance.recv().unwrap().request_unmount());
+	assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Unmounted);
+	drive_thread_handle.join().unwrap();
+
+	shutdown();
+}
+
+#[test]
 fn supports_panic_in_handler() {
 	with_test_drive(|_| unsafe {
 		let path = convert_str("Z:\\test_panic");

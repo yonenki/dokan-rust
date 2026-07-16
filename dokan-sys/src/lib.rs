@@ -341,6 +341,7 @@ extern "stdcall" {
 		WaitHandle: HANDLE,
 		WaitForCallbacks: BOOL,
 	) -> BOOL;
+	pub fn DokanRequestUnmount(DokanInstance: DOKAN_HANDLE) -> BOOL;
 	pub fn DokanCloseHandle(DokanInstance: DOKAN_HANDLE);
 	pub fn DokanUnmount(DriveLetter: WCHAR) -> BOOL;
 	pub fn DokanRemoveMountPoint(MountPoint: LPCWSTR) -> BOOL;
