@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add the `DokanCreateFileSystemEx` raw binding and its native result constants.
+
 ### Added
 
 - Raw binding for `DokanRequestUnmount`.

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add `FileSystemMounter::mount_with_cancellation` as a faithful borrowed-handle mapping of native cooperative startup cancellation.
+- Add typed cancellation, unsupported-driver-feature, legacy mount, and unknown native result errors without transmuting unknown integers.
+
 ### Added
 
 - `FileSystemHandle::request_unmount` to request a non-blocking unmount of an exact filesystem instance.

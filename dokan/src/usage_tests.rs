@@ -6,7 +6,7 @@ use std::{
 	cell::RefCell,
 	fmt::Debug,
 	mem,
-	os::windows::prelude::{AsRawHandle, FromRawHandle, OwnedHandle},
+	os::windows::prelude::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle},
 	pin::Pin,
 	process, ptr,
 	sync::mpsc::{self, Receiver, SyncSender},
@@ -55,8 +55,8 @@ use crate::{
 	operations_helpers::NtResult,
 	shutdown,
 	to_file_time::ToFileTime,
-	unmount, FileSystemHandle, FileSystemHandler, FileSystemMounter, MountFlags, MountOptions,
-	IO_SECURITY_CONTEXT,
+	unmount, CancellableMountError, FileSystemHandle, FileSystemHandler, FileSystemMounter,
+	MountFlags, MountOptions, IO_SECURITY_CONTEXT,
 };
 
 pub fn convert_str(s: impl AsRef<str>) -> U16CString {
@@ -958,6 +958,45 @@ fn requests_exact_instance_unmount() {
 	assert!(rx_instance.recv().unwrap().request_unmount());
 	assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Unmounted);
 	drive_thread_handle.join().unwrap();
+
+	shutdown();
+}
+
+#[test]
+fn negotiates_cancellable_mount_driver_support() {
+	let _guard = TEST_DRIVE_LOCK.lock();
+
+	init();
+	let _ = unmount(convert_str("Z:\\"));
+
+	let raw_event = unsafe { CreateEventW(ptr::null_mut(), TRUE, FALSE, ptr::null()) };
+	assert_ne!(raw_event, NULL);
+	let cancellation_event = unsafe { OwnedHandle::from_raw_handle(raw_event.cast()) };
+	let (tx_signal, rx_signal) = mpsc::sync_channel(1024);
+	let mount_point = convert_str("Z:\\");
+	let handler = TestHandler::new(tx_signal);
+	let options = MountOptions {
+		single_thread: true,
+		flags: test_flags(),
+		timeout: Duration::from_secs(15),
+		allocation_unit_size: 1024,
+		sector_size: 1024,
+		..Default::default()
+	};
+	let mut file_system = FileSystemMounter::new(&handler, &mount_point, &options);
+
+	match file_system.mount_with_cancellation(cancellation_event.as_handle()) {
+		Err(CancellableMountError::DriverFeatureUnsupported) => {
+			assert!(rx_signal.try_recv().is_err());
+		}
+		Ok(file_system) => {
+			assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Mounted);
+			assert!(file_system.instance().request_unmount());
+			drop(file_system);
+			assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Unmounted);
+		}
+		Err(error) => panic!("unexpected cancellable mount result: {error}"),
+	}
 
 	shutdown();
 }

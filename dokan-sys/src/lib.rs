@@ -303,6 +303,8 @@ pub const DOKAN_START_ERROR: c_int = -4;
 pub const DOKAN_MOUNT_ERROR: c_int = -5;
 pub const DOKAN_MOUNT_POINT_ERROR: c_int = -6;
 pub const DOKAN_VERSION_ERROR: c_int = -7;
+pub const DOKAN_CANCELLED_ERROR: c_int = -8;
+pub const DOKAN_DRIVER_FEATURE_ERROR: c_int = -9;
 
 #[repr(C)]
 pub struct DOKAN_MOUNT_POINT_INFO {
@@ -323,6 +325,12 @@ extern "stdcall" {
 	pub fn DokanCreateFileSystem(
 		DokanOptions: PDOKAN_OPTIONS,
 		DokanOperations: PDOKAN_OPERATIONS,
+		DokanInstance: PDOKAN_HANDLE,
+	) -> c_int;
+	pub fn DokanCreateFileSystemEx(
+		DokanOptions: PDOKAN_OPTIONS,
+		DokanOperations: PDOKAN_OPERATIONS,
+		CancellationEvent: HANDLE,
 		DokanInstance: PDOKAN_HANDLE,
 	) -> c_int;
 	pub fn DokanIsFileSystemRunning(DokanInstance: DOKAN_HANDLE) -> BOOL;

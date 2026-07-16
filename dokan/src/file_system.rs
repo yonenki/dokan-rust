@@ -2,14 +2,15 @@ use std::{
 	error::Error,
 	fmt::{self, Display, Formatter},
 	marker::PhantomData,
-	mem::transmute,
+	os::windows::io::{AsRawHandle, BorrowedHandle},
 	ptr,
 	time::Duration,
 };
 
 use bitflags::bitflags;
 use dokan_sys::{
-	DokanCloseHandle, DokanCreateFileSystem, DokanRequestUnmount, DokanWaitForFileSystemClosed,
+	DokanCloseHandle, DokanCreateFileSystem, DokanCreateFileSystemEx, DokanRequestUnmount,
+	DokanWaitForFileSystemClosed, DOKAN_CANCELLED_ERROR, DOKAN_DRIVER_FEATURE_ERROR,
 	DOKAN_DRIVER_INSTALL_ERROR, DOKAN_DRIVE_LETTER_ERROR, DOKAN_ERROR, DOKAN_HANDLE,
 	DOKAN_MOUNT_ERROR, DOKAN_MOUNT_POINT_ERROR, DOKAN_OPERATIONS, DOKAN_OPTIONS,
 	DOKAN_OPTION_ALLOW_IPC_BATCHING, DOKAN_OPTION_ALT_STREAM, DOKAN_OPTION_CASE_SENSITIVE,
@@ -169,7 +170,22 @@ pub enum FileSystemMountError {
 
 impl From<i32> for FileSystemMountError {
 	fn from(value: i32) -> Self {
-		unsafe { transmute(value) }
+		Self::from_native(value).unwrap_or(Self::General)
+	}
+}
+
+impl FileSystemMountError {
+	fn from_native(value: i32) -> Option<Self> {
+		match value {
+			DOKAN_ERROR => Some(Self::General),
+			DOKAN_DRIVE_LETTER_ERROR => Some(Self::DriveLetter),
+			DOKAN_DRIVER_INSTALL_ERROR => Some(Self::DriverInstall),
+			DOKAN_START_ERROR => Some(Self::Start),
+			DOKAN_MOUNT_ERROR => Some(Self::Mount),
+			DOKAN_MOUNT_POINT_ERROR => Some(Self::MountPoint),
+			DOKAN_VERSION_ERROR => Some(Self::Version),
+			_ => None,
+		}
 	}
 }
 
@@ -188,6 +204,79 @@ impl Display for FileSystemMountError {
 		};
 		write!(f, "{}", msg)
 	}
+}
+
+/// Error returned by [`FileSystemMounter::mount_with_cancellation`].
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum CancellableMountError {
+	/// Mount startup and its native cleanup completed after cancellation was requested.
+	Cancelled,
+	/// The loaded native driver does not implement cancellable mount startup.
+	DriverFeatureUnsupported,
+	/// A mount error also returned by the legacy [`FileSystemMounter::mount`] path.
+	Mount(FileSystemMountError),
+	/// An unrecognized native result was returned without reinterpreting it as an enum.
+	UnknownNativeResult(i32),
+}
+
+impl CancellableMountError {
+	fn from_native(value: i32) -> Self {
+		match value {
+			DOKAN_CANCELLED_ERROR => Self::Cancelled,
+			DOKAN_DRIVER_FEATURE_ERROR => Self::DriverFeatureUnsupported,
+			_ => FileSystemMountError::from_native(value)
+				.map(Self::Mount)
+				.unwrap_or(Self::UnknownNativeResult(value)),
+		}
+	}
+}
+
+impl Error for CancellableMountError {
+	fn source(&self) -> Option<&(dyn Error + 'static)> {
+		match self {
+			Self::Mount(error) => Some(error),
+			_ => None,
+		}
+	}
+}
+
+impl Display for CancellableMountError {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Cancelled => f.write_str("mount startup was cancelled and cleaned up"),
+			Self::DriverFeatureUnsupported => {
+				f.write_str("the loaded driver does not support cancellable mount startup")
+			}
+			Self::Mount(error) => Display::fmt(error, f),
+			Self::UnknownNativeResult(value) => {
+				write!(f, "unknown native mount result {value}")
+			}
+		}
+	}
+}
+
+#[test]
+fn maps_extended_mount_results_without_reinterpreting_unknown_values() {
+	assert_eq!(
+		FileSystemMountError::from(-12345),
+		FileSystemMountError::General
+	);
+	assert_eq!(
+		CancellableMountError::from_native(DOKAN_CANCELLED_ERROR),
+		CancellableMountError::Cancelled
+	);
+	assert_eq!(
+		CancellableMountError::from_native(DOKAN_DRIVER_FEATURE_ERROR),
+		CancellableMountError::DriverFeatureUnsupported
+	);
+	assert_eq!(
+		CancellableMountError::from_native(DOKAN_MOUNT_ERROR),
+		CancellableMountError::Mount(FileSystemMountError::Mount)
+	);
+	assert_eq!(
+		CancellableMountError::from_native(-12345),
+		CancellableMountError::UnknownNativeResult(-12345)
+	);
 }
 
 /// A mounter of [`FileSystem`].
@@ -276,6 +365,35 @@ impl<'c, 'h: 'c, FSH: FileSystemHandler<'c, 'h> + 'h> FileSystemMounter<'c, 'h, 
 			})
 		} else {
 			Err(result.into())
+		}
+	}
+
+	/// Mounts with a borrowed manual-reset event for cooperative startup cancellation.
+	///
+	/// The native call does not return [`CancellableMountError::Cancelled`] until startup
+	/// cleanup is complete, so the event and this mounter stay borrowed for the whole
+	/// operation. The event may be signalled from another thread.
+	pub fn mount_with_cancellation(
+		&mut self,
+		cancellation_event: BorrowedHandle<'_>,
+	) -> Result<FileSystem<'c, 'h, FSH>, CancellableMountError> {
+		let mut instance = ptr::null_mut();
+		let result = unsafe {
+			DokanCreateFileSystemEx(
+				&mut self.options,
+				&mut self.operations,
+				cancellation_event.as_raw_handle().cast(),
+				&mut instance,
+			)
+		};
+
+		if result == DOKAN_SUCCESS {
+			Ok(FileSystem {
+				instance,
+				_pin: PhantomData,
+			})
+		} else {
+			Err(CancellableMountError::from_native(result))
 		}
 	}
 }
