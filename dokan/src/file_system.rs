@@ -373,6 +373,10 @@ impl<'c, 'h: 'c, FSH: FileSystemHandler<'c, 'h> + 'h> FileSystemMounter<'c, 'h, 
 	/// The native call does not return [`CancellableMountError::Cancelled`] until startup
 	/// cleanup is complete, so the event and this mounter stay borrowed for the whole
 	/// operation. The event may be signalled from another thread.
+	///
+	/// Cancellation is cooperative across the native driver stack. If a lower driver
+	/// does not complete a cancelled request, this call can remain blocked; use process
+	/// isolation when that failure class requires a hard termination bound.
 	pub fn mount_with_cancellation(
 		&mut self,
 		cancellation_event: BorrowedHandle<'_>,
