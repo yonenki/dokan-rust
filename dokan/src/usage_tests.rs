@@ -22,7 +22,7 @@ use parking_lot::Mutex;
 use widestring::{U16CStr, U16CString};
 use winapi::{
 	shared::{
-		minwindef::{BOOL, FALSE, HLOCAL, LPCVOID, LPVOID, MAX_PATH, TRUE},
+		minwindef::{BOOL, FALSE, FILETIME, HLOCAL, LPCVOID, LPVOID, MAX_PATH, TRUE},
 		ntdef::{HANDLE, NTSTATUS, NULL},
 		ntstatus::{STATUS_ACCESS_DENIED, STATUS_NOT_IMPLEMENTED, STATUS_SUCCESS},
 		sddl::ConvertSidToStringSidW,
@@ -1313,9 +1313,9 @@ fn can_set_file_time() {
 				FileTimeOperation::SetTime(mtime),
 			)
 		);
-		let time_dont_change = mem::transmute(0i64);
-		let time_disable_update = mem::transmute(-1i64);
-		let time_resume_update = mem::transmute(-2i64);
+		let time_dont_change = mem::transmute::<i64, FILETIME>(0i64);
+		let time_disable_update = mem::transmute::<i64, FILETIME>(-1i64);
+		let time_resume_update = mem::transmute::<i64, FILETIME>(-2i64);
 		assert_eq_win32!(
 			SetFileTime(
 				hf,

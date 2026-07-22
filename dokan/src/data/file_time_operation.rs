@@ -1,7 +1,4 @@
-use std::{
-	mem::transmute_copy,
-	time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use winapi::shared::minwindef::FILETIME;
 
@@ -20,22 +17,21 @@ pub enum FileTimeOperation {
 	ResumeUpdate,
 }
 
-impl From<*const FILETIME> for FileTimeOperation {
-	fn from(time: *const FILETIME) -> Self {
-		unsafe {
-			let time_val = transmute_copy::<_, i64>(&*time);
-			match time_val {
-				0 => FileTimeOperation::DontChange,
-				-1 => FileTimeOperation::DisableUpdate,
-				-2 => FileTimeOperation::ResumeUpdate,
-				_ => {
-					let time_val = time_val as u64;
-					FileTimeOperation::SetTime(
-						UNIX_EPOCH - FILETIME_OFFSET
-							+ Duration::from_micros(time_val / 10)
-							+ Duration::from_nanos(time_val % 10 * 100),
-					)
-				}
+impl FileTimeOperation {
+	pub(crate) unsafe fn from_raw(time: *const FILETIME) -> Self {
+		let time = unsafe { &*time };
+		let time_val = ((time.dwHighDateTime as u64) << 32 | time.dwLowDateTime as u64) as i64;
+		match time_val {
+			0 => FileTimeOperation::DontChange,
+			-1 => FileTimeOperation::DisableUpdate,
+			-2 => FileTimeOperation::ResumeUpdate,
+			_ => {
+				let time_val = time_val as u64;
+				FileTimeOperation::SetTime(
+					UNIX_EPOCH - FILETIME_OFFSET
+						+ Duration::from_micros(time_val / 10)
+						+ Duration::from_nanos(time_val % 10 * 100),
+				)
 			}
 		}
 	}

@@ -2,7 +2,10 @@ use std::{mem::transmute, time::SystemTime};
 
 use dokan_sys::win32::WIN32_FIND_STREAM_DATA;
 use widestring::U16CString;
-use winapi::{shared::minwindef::MAX_PATH, um::minwinbase::WIN32_FIND_DATAW};
+use winapi::{
+	shared::{minwindef::MAX_PATH, ntdef::LARGE_INTEGER},
+	um::minwinbase::WIN32_FIND_DATAW,
+};
 
 use crate::{to_file_time::ToFileTime, FillDataError, FillDataResult};
 
@@ -90,7 +93,7 @@ impl ToRawStruct<WIN32_FIND_STREAM_DATA> for FindStreamData {
 			let mut c_stream_name = [0; MAX_STREAM_NAME];
 			c_stream_name[..name_slice.len()].copy_from_slice(name_slice);
 			Some(WIN32_FIND_STREAM_DATA {
-				StreamSize: unsafe { transmute(self.size) },
+				StreamSize: unsafe { transmute::<i64, LARGE_INTEGER>(self.size) },
 				cStreamName: c_stream_name,
 			})
 		} else {
@@ -100,7 +103,7 @@ impl ToRawStruct<WIN32_FIND_STREAM_DATA> for FindStreamData {
 }
 
 pub(crate) fn wrap_fill_data<T, U: ToRawStruct<T>, TArg: Copy, TResult: PartialEq>(
-	fill_data: unsafe extern "stdcall" fn(*mut T, TArg) -> TResult,
+	fill_data: unsafe extern "system" fn(*mut T, TArg) -> TResult,
 	fill_data_arg: TArg,
 	success_value: TResult,
 ) -> impl FnMut(&U) -> FillDataResult {
@@ -137,11 +140,11 @@ mod tests {
 		}
 	}
 
-	extern "stdcall" fn fill_data_stub(_data: *mut (), _info: PDOKAN_FILE_INFO) -> c_int {
+	extern "system" fn fill_data_stub(_data: *mut (), _info: PDOKAN_FILE_INFO) -> c_int {
 		0
 	}
 
-	extern "stdcall" fn failing_fill_data_stub(_data: *mut (), _info: PDOKAN_FILE_INFO) -> c_int {
+	extern "system" fn failing_fill_data_stub(_data: *mut (), _info: PDOKAN_FILE_INFO) -> c_int {
 		1
 	}
 
