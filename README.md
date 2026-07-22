@@ -1,4 +1,4 @@
-# Textil Dokany Rust Wrapper
+# Dokany Rust Wrapper
 
 This fork binds Rust applications to an explicitly selected [Dokany distribution profile](https://github.com/yonenki/dokany). It consists of two crates:
 
@@ -10,11 +10,11 @@ Generally, it is recommended to use the `dokan` crate, which has the unsafe raw 
 
 # Build
 
-`dokan-sys`, which is also a dependency of `dokan`, generates a validated distribution profile and builds the matching user-mode DLL and import library from the bundled Dokany source. The default profile is `profiles/textil.json`, producing `textildokan2.dll`.
+`dokan-sys`, which is also a dependency of `dokan`, generates a validated distribution profile and builds the matching user-mode DLL and import library from the bundled Dokany source. The default profile is `profiles/upstream.json`, preserving the upstream Dokany family.
 
 The build requires .NET 8, Visual Studio C++ Build Tools, and a Windows SDK. It never discovers or links an installed official Dokan library. This prevents a developer or user machine from silently selecting a different driver family.
 
-Set `DOKAN_DISTRIBUTION_PROFILE` to an explicit profile JSON path to build another family. Set `DOKAN_DLL_OUTPUT_PATH` to copy the generated DLL, with version resources, into an application staging directory. Both the native library and Rust crate receive the same generated profile hash, protocol ABI, names, and family identity.
+Set `DOKAN_DISTRIBUTION_PROFILE` to an explicit external profile JSON path to build another family. Set `DOKAN_DLL_OUTPUT_PATH` to copy the generated DLL, with version resources, into an application staging directory. Both the native library and Rust crate receive the same generated profile hash, protocol ABI, names, and family identity.
 
 Applications can call `verify_runtime_identity` before mounting. It rejects a driver whose schema, protocol ABI, capabilities, or profile hash do not match the linked DLL. Mount creation also performs the native fail-closed identity check.
 

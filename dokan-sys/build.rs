@@ -11,7 +11,7 @@ use std::{
 use cc::{Build, Tool};
 use serde::Deserialize;
 
-const DEFAULT_DISTRIBUTION_PROFILE: &str = "src/dokany/profiles/textil.json";
+const DEFAULT_DISTRIBUTION_PROFILE: &str = "src/dokany/profiles/upstream.json";
 const DISTRIBUTION_PROFILE_ENV: &str = "DOKAN_DISTRIBUTION_PROFILE";
 const DLL_OUTPUT_PATH_ENV: &str = "DOKAN_DLL_OUTPUT_PATH";
 
@@ -149,7 +149,7 @@ fn compile_version_resource(
 		.arg("/Isrc/dokany/dokan")
 		.arg(format!("/fo{}", resource.display()))
 		.arg("src/dokany/dokan/dokan.rc");
-	run_checked(&mut command, "Textil Dokany version resource compilation")?;
+	run_checked(&mut command, "Dokany version resource compilation")?;
 	println!("cargo:rerun-if-changed=src/dokany/dokan/dokan.rc");
 	Ok(Some(resource))
 }
@@ -197,7 +197,7 @@ fn build_dokan(
 			.args(&sources)
 			.arg(format!("-Wl,--out-implib,{}", import_library.display()));
 	}
-	run_checked(&mut command, "Textil Dokany user-mode library build")?;
+	run_checked(&mut command, "Dokany user-mode library build")?;
 
 	println!("cargo:rerun-if-env-changed={DLL_OUTPUT_PATH_ENV}");
 	println!("cargo:rerun-if-env-changed=CARGO_BUILD_BUILD_DIR");
@@ -225,7 +225,10 @@ fn runtime_dll_destinations(
 		.ancestors()
 		.nth(3)
 		.ok_or("OUT_DIR is not nested below a Cargo profile directory")?;
-	let mut destinations = BTreeSet::from([profile_dir.join(dll_name)]);
+	let mut destinations = BTreeSet::from([
+		profile_dir.join(dll_name),
+		profile_dir.join("deps").join(dll_name),
+	]);
 
 	if let (Some(build_dir), Some(target_dir)) = (
 		env::var_os("CARGO_BUILD_BUILD_DIR").map(PathBuf::from),
@@ -234,7 +237,9 @@ fn runtime_dll_destinations(
 		if build_dir.is_absolute() && target_dir.is_absolute() {
 			if let Ok(profile_suffix) = profile_dir.strip_prefix(build_dir) {
 				if !profile_suffix.as_os_str().is_empty() {
-					destinations.insert(target_dir.join(profile_suffix).join(dll_name));
+					let target_profile_dir = target_dir.join(profile_suffix);
+					destinations.insert(target_profile_dir.join(dll_name));
+					destinations.insert(target_profile_dir.join("deps").join(dll_name));
 				}
 			}
 		}
