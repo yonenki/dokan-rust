@@ -1,4 +1,5 @@
 use std::{
+	collections::BTreeSet,
 	env,
 	error::Error,
 	ffi::OsStr,
@@ -199,16 +200,50 @@ fn build_dokan(
 	run_checked(&mut command, "Textil Dokany user-mode library build")?;
 
 	println!("cargo:rerun-if-env-changed={DLL_OUTPUT_PATH_ENV}");
-	if let Some(output_path) = env::var_os(DLL_OUTPUT_PATH_ENV) {
-		let output_path = PathBuf::from(output_path);
-		fs::create_dir_all(&output_path)?;
-		fs::copy(&dll_path, output_path.join(&dll_name))?;
+	println!("cargo:rerun-if-env-changed=CARGO_BUILD_BUILD_DIR");
+	println!("cargo:rerun-if-env-changed=CARGO_TARGET_DIR");
+	for destination in runtime_dll_destinations(out_dir, &dll_name)? {
+		fs::create_dir_all(
+			destination
+				.parent()
+				.ok_or("Dokany runtime destination has no parent")?,
+		)?;
+		fs::copy(&dll_path, &destination)?;
 	}
 
 	println!("cargo:rustc-link-search=native={}", out_dir.display());
 	println!("cargo:rerun-if-changed=src/dokany/dokan");
 	println!("cargo:rerun-if-changed=src/dokany/sys");
 	Ok(())
+}
+
+fn runtime_dll_destinations(
+	out_dir: &Path,
+	dll_name: &str,
+) -> Result<Vec<PathBuf>, Box<dyn Error>> {
+	let profile_dir = out_dir
+		.ancestors()
+		.nth(3)
+		.ok_or("OUT_DIR is not nested below a Cargo profile directory")?;
+	let mut destinations = BTreeSet::from([profile_dir.join(dll_name)]);
+
+	if let (Some(build_dir), Some(target_dir)) = (
+		env::var_os("CARGO_BUILD_BUILD_DIR").map(PathBuf::from),
+		env::var_os("CARGO_TARGET_DIR").map(PathBuf::from),
+	) {
+		if build_dir.is_absolute() && target_dir.is_absolute() {
+			if let Ok(profile_suffix) = profile_dir.strip_prefix(build_dir) {
+				if !profile_suffix.as_os_str().is_empty() {
+					destinations.insert(target_dir.join(profile_suffix).join(dll_name));
+				}
+			}
+		}
+	}
+
+	if let Some(output_path) = env::var_os(DLL_OUTPUT_PATH_ENV) {
+		destinations.insert(PathBuf::from(output_path).join(dll_name));
+	}
+	Ok(destinations.into_iter().collect())
 }
 
 fn crate_dokany_version() -> Result<String, Box<dyn Error>> {
