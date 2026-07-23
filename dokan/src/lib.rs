@@ -28,6 +28,7 @@ mod file_system_handler;
 mod notify;
 mod operations;
 mod operations_helpers;
+mod runtime_identity;
 mod to_file_time;
 
 #[cfg(test)]
@@ -43,13 +44,16 @@ use winapi::{
 	um::{errhandlingapi::GetLastError, winnt::ACCESS_MASK},
 };
 
-pub use crate::{data::*, file_system::*, file_system_handler::*, notify::*};
+pub use crate::{data::*, file_system::*, file_system_handler::*, notify::*, runtime_identity::*};
 
 /// Re-exported from `dokan-sys` for convenience.
 pub use dokan_sys::{
-	DOKAN_DRIVER_NAME as DRIVER_NAME, DOKAN_IO_SECURITY_CONTEXT as IO_SECURITY_CONTEXT,
+	DOKAN_BINARY_BASENAME as BINARY_BASENAME, DOKAN_DISTRIBUTION_ID as DISTRIBUTION_ID,
+	DOKAN_DRIVER_NAME as DRIVER_NAME, DOKAN_DRIVER_SERVICE_NAME as DRIVER_SERVICE_NAME,
+	DOKAN_DRIVER_VERSION as DRIVER_ABI_VERSION, DOKAN_IO_SECURITY_CONTEXT as IO_SECURITY_CONTEXT,
 	DOKAN_MAJOR_API_VERSION as MAJOR_API_VERSION, DOKAN_NP_NAME as NP_NAME,
-	DOKAN_VERSION as WRAPPER_VERSION,
+	DOKAN_PRODUCT_VERSION as PRODUCT_VERSION, DOKAN_PROFILE_HASH_HEX as PROFILE_HASH_HEX,
+	DOKAN_RUNTIME_DLL_NAME as RUNTIME_DLL_NAME, DOKAN_VERSION as WRAPPER_VERSION,
 };
 
 /// Initializes all required Dokan internal resources.
@@ -186,17 +190,17 @@ fn can_map_win32_error_to_ntstatus() {
 /// # use winapi::{shared::ntdef::NTSTATUS, um::processenv::GetCurrentDirectoryW};
 /// #
 /// fn get_current_directory() -> Result<U16CString, NTSTATUS> {
-/// 	unsafe {
-/// 		let len = GetCurrentDirectoryW(0, ptr::null_mut());
-/// 		win32_ensure(len != 0)?;
+///     unsafe {
+///         let len = GetCurrentDirectoryW(0, ptr::null_mut());
+///         win32_ensure(len != 0)?;
 ///
-/// 		let mut buffer = Vec::with_capacity(len as usize);
-/// 		let actual_len = GetCurrentDirectoryW(len, buffer.as_mut_ptr());
-/// 		win32_ensure(actual_len != 0)?;
-/// 		assert_eq!(actual_len, len);
+///         let mut buffer = Vec::with_capacity(len as usize);
+///         let actual_len = GetCurrentDirectoryW(len, buffer.as_mut_ptr());
+///         win32_ensure(actual_len != 0)?;
+///         assert_eq!(actual_len, len);
 ///
-/// 		Ok(U16CString::from_vec_unchecked(buffer))
-/// 	}
+///         Ok(U16CString::from_vec_unchecked(buffer))
+///     }
 /// }
 /// ```
 pub fn win32_ensure(condition: bool) -> Result<(), NTSTATUS> {

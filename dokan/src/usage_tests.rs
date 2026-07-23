@@ -6,7 +6,7 @@ use std::{
 	cell::RefCell,
 	fmt::Debug,
 	mem,
-	os::windows::prelude::{AsRawHandle, FromRawHandle, OwnedHandle},
+	os::windows::prelude::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle},
 	pin::Pin,
 	process, ptr,
 	sync::mpsc::{self, Receiver, SyncSender},
@@ -22,7 +22,7 @@ use parking_lot::Mutex;
 use widestring::{U16CStr, U16CString};
 use winapi::{
 	shared::{
-		minwindef::{BOOL, FALSE, HLOCAL, LPCVOID, LPVOID, MAX_PATH, TRUE},
+		minwindef::{BOOL, FALSE, FILETIME, HLOCAL, LPCVOID, LPVOID, MAX_PATH, TRUE},
 		ntdef::{HANDLE, NTSTATUS, NULL},
 		ntstatus::{STATUS_ACCESS_DENIED, STATUS_NOT_IMPLEMENTED, STATUS_SUCCESS},
 		sddl::ConvertSidToStringSidW,
@@ -55,8 +55,8 @@ use crate::{
 	operations_helpers::NtResult,
 	shutdown,
 	to_file_time::ToFileTime,
-	unmount, FileSystemHandle, FileSystemHandler, FileSystemMounter, MountFlags, MountOptions,
-	IO_SECURITY_CONTEXT,
+	unmount, CancellableMountError, FileSystemHandle, FileSystemHandler, FileSystemMounter,
+	MountFlags, MountOptions, IO_SECURITY_CONTEXT,
 };
 
 pub fn convert_str(s: impl AsRef<str>) -> U16CString {
@@ -928,6 +928,80 @@ pub fn with_test_drive<Scope: FnOnce(TestDriveContext)>(scope: Scope) {
 }
 
 #[test]
+fn requests_exact_instance_unmount() {
+	let _guard = TEST_DRIVE_LOCK.lock();
+
+	init();
+	let _ = unmount(convert_str("Z:\\"));
+
+	let (tx_instance, rx_instance) = mpsc::sync_channel(1);
+	let (tx_signal, rx_signal) = mpsc::sync_channel(1024);
+
+	let drive_thread_handle = thread::spawn(move || {
+		let mount_point = convert_str("Z:\\");
+		let handler = TestHandler::new(tx_signal);
+		let options = MountOptions {
+			single_thread: true,
+			flags: test_flags(),
+			timeout: Duration::from_secs(15),
+			allocation_unit_size: 1024,
+			sector_size: 1024,
+			..Default::default()
+		};
+		let mut file_system = FileSystemMounter::new(&handler, &mount_point, &options);
+		let mount_handle = file_system.mount().unwrap();
+		tx_instance.send(mount_handle.instance()).unwrap();
+		drop(mount_handle);
+	});
+
+	assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Mounted);
+	assert!(rx_instance.recv().unwrap().request_unmount());
+	assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Unmounted);
+	drive_thread_handle.join().unwrap();
+
+	shutdown();
+}
+
+#[test]
+fn negotiates_cancellable_mount_driver_support() {
+	let _guard = TEST_DRIVE_LOCK.lock();
+
+	init();
+	let _ = unmount(convert_str("Z:\\"));
+
+	let raw_event = unsafe { CreateEventW(ptr::null_mut(), TRUE, FALSE, ptr::null()) };
+	assert_ne!(raw_event, NULL);
+	let cancellation_event = unsafe { OwnedHandle::from_raw_handle(raw_event.cast()) };
+	let (tx_signal, rx_signal) = mpsc::sync_channel(1024);
+	let mount_point = convert_str("Z:\\");
+	let handler = TestHandler::new(tx_signal);
+	let options = MountOptions {
+		single_thread: true,
+		flags: test_flags(),
+		timeout: Duration::from_secs(15),
+		allocation_unit_size: 1024,
+		sector_size: 1024,
+		..Default::default()
+	};
+	let mut file_system = FileSystemMounter::new(&handler, &mount_point, &options);
+
+	match file_system.mount_with_cancellation(cancellation_event.as_handle()) {
+		Err(CancellableMountError::DriverFeatureUnsupported) => {
+			assert!(rx_signal.try_recv().is_err());
+		}
+		Ok(file_system) => {
+			assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Mounted);
+			assert!(file_system.instance().request_unmount());
+			drop(file_system);
+			assert_eq!(rx_signal.recv().unwrap(), HandlerSignal::Unmounted);
+		}
+		Err(error) => panic!("unexpected cancellable mount result: {error}"),
+	}
+
+	shutdown();
+}
+
+#[test]
 fn supports_panic_in_handler() {
 	with_test_drive(|_| unsafe {
 		let path = convert_str("Z:\\test_panic");
@@ -1239,9 +1313,9 @@ fn can_set_file_time() {
 				FileTimeOperation::SetTime(mtime),
 			)
 		);
-		let time_dont_change = mem::transmute(0i64);
-		let time_disable_update = mem::transmute(-1i64);
-		let time_resume_update = mem::transmute(-2i64);
+		let time_dont_change = mem::transmute::<i64, FILETIME>(0i64);
+		let time_disable_update = mem::transmute::<i64, FILETIME>(-1i64);
+		let time_resume_update = mem::transmute::<i64, FILETIME>(-2i64);
 		assert_eq_win32!(
 			SetFileTime(
 				hf,

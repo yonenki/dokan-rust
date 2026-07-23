@@ -1,10 +1,10 @@
 [package]
 name = "dokan"
-version = "0.3.1+dokan230"
+version = "0.3.2+dokan231"
 authors = ["DDoSolitary <DDoSolitary@gmail.com>"]
 description = "Rust-friendly wrapper for Dokan (user mode file system library for Windows)"
 homepage = "https://dokan-dev.github.io"
-repository = "https://github.com/dokan-dev/dokan-rust"
+repository = "https://github.com/yonenki/dokan-rust"
 documentation = "https://dokan-dev.github.io/dokan-rust-doc/html/dokan/"
 keywords = ["dokan", "bindings", "driver", "filesystem"]
 categories = ["external-ffi-bindings"]
