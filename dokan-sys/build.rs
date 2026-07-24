@@ -40,6 +40,34 @@ fn run_checked(command: &mut Command, description: &str) -> Result<(), Box<dyn E
 	Ok(())
 }
 
+fn copy_distribution_profile_project(
+	source: &Path,
+	destination: &Path,
+) -> Result<(), Box<dyn Error>> {
+	fs::create_dir_all(destination)?;
+	for entry in fs::read_dir(source)? {
+		let entry = entry?;
+		let name = entry.file_name();
+		if name == OsStr::new("bin") || name == OsStr::new("obj") {
+			continue;
+		}
+		let file_type = entry.file_type()?;
+		let destination = destination.join(&name);
+		if file_type.is_dir() {
+			copy_distribution_profile_project(&entry.path(), &destination)?;
+		} else if file_type.is_file() {
+			fs::copy(entry.path(), destination)?;
+		} else {
+			return Err(format!(
+				"distribution profile project contains an unsupported entry: {}",
+				entry.path().display()
+			)
+			.into());
+		}
+	}
+	Ok(())
+}
+
 fn generate_distribution_profile(out_dir: &Path) -> Result<PathBuf, Box<dyn Error>> {
 	let profile = env::var_os(DISTRIBUTION_PROFILE_ENV)
 		.map(PathBuf::from)
@@ -61,11 +89,16 @@ fn generate_distribution_profile(out_dir: &Path) -> Result<PathBuf, Box<dyn Erro
 	println!("cargo:rerun-if-changed=src/dokany/tools/DistributionProfile");
 	println!("cargo:rerun-if-changed=src/dokany/profiles");
 
+	let dotnet_project = out_dir.join("dotnet-project");
+	copy_distribution_profile_project(
+		Path::new("src/dokany/tools/DistributionProfile"),
+		&dotnet_project,
+	)?;
 	run_checked(
 		Command::new("dotnet")
 			.arg("run")
 			.arg("--project")
-			.arg("src/dokany/tools/DistributionProfile/DistributionProfile.csproj")
+			.arg(dotnet_project.join("DistributionProfile.csproj"))
 			.arg("--")
 			.arg("generate")
 			.arg(&profile)
@@ -123,6 +156,47 @@ fn c_sources() -> Result<Vec<PathBuf>, Box<dyn Error>> {
 	Ok(sources)
 }
 
+fn windows_resource_compiler(host_tools_arch: &str) -> Result<PathBuf, Box<dyn Error>> {
+	if let Some(sdk_root) = env::var_os("WindowsSdkDir").map(PathBuf::from) {
+		let mut candidates = vec![sdk_root.join("bin").join("rc.exe")];
+		if let Some(version) = env::var_os("WindowsSDKVersion") {
+			let version = version.to_string_lossy();
+			let version = version.trim_end_matches(['\\', '/']);
+			if !version.is_empty() {
+				candidates.push(
+					sdk_root
+						.join("bin")
+						.join(version)
+						.join(host_tools_arch)
+						.join("rc.exe"),
+				);
+			}
+		}
+		if let Some(resource_compiler) = candidates.into_iter().find(|path| path.is_file()) {
+			return Ok(resource_compiler);
+		}
+		return Err(format!(
+			"WindowsSdkDir does not contain the resource compiler for {host_tools_arch}: {}",
+			sdk_root.display()
+		)
+		.into());
+	}
+
+	let program_files_x86 = env::var_os("ProgramFiles(x86)").ok_or(
+		"neither WindowsSdkDir nor ProgramFiles(x86) is set; cannot locate the Windows SDK",
+	)?;
+	let sdk_bin_root = PathBuf::from(program_files_x86).join("Windows Kits/10/bin");
+	let mut sdk_versions = fs::read_dir(&sdk_bin_root)?
+		.map(|entry| entry.map(|entry| entry.path()))
+		.collect::<Result<Vec<_>, _>>()?;
+	sdk_versions.retain(|path| path.join(host_tools_arch).join("rc.exe").is_file());
+	sdk_versions.sort();
+	sdk_versions
+		.last()
+		.map(|path| path.join(host_tools_arch).join("rc.exe"))
+		.ok_or_else(|| "Windows SDK resource compiler rc.exe was not found".into())
+}
+
 fn compile_version_resource(
 	compiler: &Tool,
 	out_dir: &Path,
@@ -133,23 +207,12 @@ fn compile_version_resource(
 		return Ok(None);
 	}
 
-	let program_files_x86 = env::var_os("ProgramFiles(x86)")
-		.ok_or("ProgramFiles(x86) is not set; cannot locate the Windows SDK")?;
-	let sdk_bin_root = PathBuf::from(program_files_x86).join("Windows Kits/10/bin");
 	let host_tools_arch = if env::var("HOST")?.starts_with("x86_64-") {
 		"x64"
 	} else {
 		"x86"
 	};
-	let mut sdk_versions = fs::read_dir(&sdk_bin_root)?
-		.map(|entry| entry.map(|entry| entry.path()))
-		.collect::<Result<Vec<_>, _>>()?;
-	sdk_versions.retain(|path| path.join(host_tools_arch).join("rc.exe").is_file());
-	sdk_versions.sort();
-	let resource_compiler = sdk_versions
-		.last()
-		.map(|path| path.join(host_tools_arch).join("rc.exe"))
-		.ok_or("Windows SDK resource compiler rc.exe was not found")?;
+	let resource_compiler = windows_resource_compiler(host_tools_arch)?;
 	let resource = out_dir.join("dokan.res");
 	let mut command = Command::new(resource_compiler);
 	for (name, value) in compiler.env() {
