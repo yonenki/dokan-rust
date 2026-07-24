@@ -12,6 +12,7 @@ use cc::{Build, Tool};
 use serde::Deserialize;
 
 const DEFAULT_DISTRIBUTION_PROFILE: &str = "src/dokany/profiles/upstream.json";
+const DOKANY_SOURCE_COMMIT_PATH: &str = "src/dokany-source-commit.txt";
 const DISTRIBUTION_PROFILE_ENV: &str = "DOKAN_DISTRIBUTION_PROFILE";
 const DLL_OUTPUT_PATH_ENV: &str = "DOKAN_DLL_OUTPUT_PATH";
 
@@ -44,23 +45,18 @@ fn generate_distribution_profile(out_dir: &Path) -> Result<PathBuf, Box<dyn Erro
 		.map(PathBuf::from)
 		.unwrap_or_else(|| PathBuf::from(DEFAULT_DISTRIBUTION_PROFILE));
 	let generated_dir = out_dir.join("distribution-profile");
-	let source_commit_output = Command::new("git")
-		.args(["-C", "src/dokany", "rev-parse", "HEAD"])
-		.output()?;
-	if !source_commit_output.status.success() {
-		return Err(format!(
-			"resolving the pinned Dokany source commit failed with {}",
-			source_commit_output.status
-		)
-		.into());
-	}
-	let source_commit = String::from_utf8(source_commit_output.stdout)?;
+	let source_commit = fs::read_to_string(DOKANY_SOURCE_COMMIT_PATH)?;
 	let source_commit = source_commit.trim();
-	if source_commit.len() != 40 || !source_commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+	if source_commit.len() != 40
+		|| !source_commit
+			.bytes()
+			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+	{
 		return Err("pinned Dokany source commit is not a full Git object ID".into());
 	}
 
 	println!("cargo:rerun-if-env-changed={DISTRIBUTION_PROFILE_ENV}");
+	println!("cargo:rerun-if-changed={DOKANY_SOURCE_COMMIT_PATH}");
 	println!("cargo:rerun-if-changed={}", profile.display());
 	println!("cargo:rerun-if-changed=src/dokany/tools/DistributionProfile");
 	println!("cargo:rerun-if-changed=src/dokany/profiles");
